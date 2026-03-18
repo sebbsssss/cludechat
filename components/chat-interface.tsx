@@ -2,10 +2,10 @@
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Brain, Link, Folder, Mic } from "lucide-react"
+import { Brain, Link, Folder, Mic, Send } from "lucide-react"
 import { LiquidMetal, PulsingBorder } from "@paper-design/shaders-react"
-import { motion } from "framer-motion"
-import { useState } from "react"
+import { motion, AnimatePresence } from "framer-motion"
+import { useState, useRef, useEffect } from "react"
 
 interface Message {
   id: string
@@ -14,91 +14,306 @@ interface Message {
   timestamp: Date
 }
 
+const mockResponses = [
+  "I'd be happy to help you with that! Based on what you've shared, here's what I think would work best...",
+  "That's an interesting question. Let me break this down for you step by step.",
+  "Great thinking! Here's my perspective on this topic...",
+  "I understand what you're looking for. Here's a detailed explanation...",
+  "Thanks for asking! This is actually a fascinating topic. Let me explain...",
+]
+
 export function ChatInterface() {
   const [isFocused, setIsFocused] = useState(false)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [inputValue, setInputValue] = useState("")
+  const [isTyping, setIsTyping] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
+
+  const handleSend = async () => {
+    if (!inputValue.trim()) return
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      content: inputValue.trim(),
+      role: "user",
+      timestamp: new Date(),
+    }
+
+    setMessages((prev) => [...prev, userMessage])
+    setInputValue("")
+    setIsTyping(true)
+
+    // Simulate AI response delay
+    setTimeout(() => {
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: mockResponses[Math.floor(Math.random() * mockResponses.length)],
+        role: "assistant",
+        timestamp: new Date(),
+      }
+      setMessages((prev) => [...prev, assistantMessage])
+      setIsTyping(false)
+    }, 1500)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  const hasMessages = messages.length > 0
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-4">
-      <div className="w-full max-w-4xl relative">
-        <div className="flex flex-row items-center mb-2">
-          {/* Shader Circle */}
-          <motion.div
-            id="circle-ball"
-            className="relative flex items-center justify-center z-10"
-            animate={{
-              y: isFocused ? 50 : 0,
-              opacity: isFocused ? 0 : 100,
-              filter: isFocused ? "blur(4px)" : "blur(0px)",
-              rotation: isFocused ? 180 : 0,
-            }}
-            transition={{
-              duration: 0.5,
-              type: "spring",
-              stiffness: 200,
-              damping: 20,
-            }}
-          >
-            <div className="z-10 absolute bg-white/5 h-11 w-11 rounded-full backdrop-blur-[3px]">
-              <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-4 left-4  blur-[1px]" />
-              <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-3 left-7  blur-[0.8px]" />
-              <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-8 left-2  blur-[1px]" />
-              <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-5 left-9 blur-[0.8px]" />
-              <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-7 left-7  blur-[1px]" />
-            </div>
-            <LiquidMetal
-              style={{ height: 80, width: 80, filter: "blur(14px)", position: "absolute" }}
-              colorBack="hsl(0, 0%, 0%, 0)"
-              colorTint="hsl(220, 100%, 45%)"
-              repetition={4}
-              softness={0.5}
-              shiftRed={0.05}
-              shiftBlue={0.6}
-              distortion={0.1}
-              contour={1}
-              shape="circle"
-              offsetX={0}
-              offsetY={0}
-              scale={0.58}
-              rotation={50}
-              speed={5}
-            />
-            <LiquidMetal
-              style={{ height: 80, width: 80 }}
-              colorBack="hsl(0, 0%, 0%, 0)"
-              colorTint="hsl(220, 100%, 45%)"
-              repetition={4}
-              softness={0.5}
-              shiftRed={0.05}
-              shiftBlue={0.6}
-              distortion={0.1}
-              contour={1}
-              shape="circle"
-              offsetX={0}
-              offsetY={0}
-              scale={0.58}
-              rotation={50}
-              speed={5}
-            />
-          </motion.div>
+    <div className="flex flex-col min-h-screen p-4">
+      <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col">
+        {/* Messages Area */}
+        <AnimatePresence>
+          {hasMessages && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              className="flex-1 overflow-y-auto mb-4 space-y-4 max-h-[60vh]"
+            >
+              {messages.map((message) => (
+                <motion.div
+                  key={message.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                >
+                  {message.role === "assistant" && (
+                    <div className="flex items-start gap-3">
+                      {/* Mini shader avatar for assistant */}
+                      <div className="relative flex items-center justify-center w-8 h-8 flex-shrink-0">
+                        <div className="z-10 absolute bg-white/5 h-6 w-6 rounded-full backdrop-blur-[2px]">
+                          <div className="h-[1px] w-[1px] bg-white rounded-full absolute top-2 left-2 blur-[0.5px]" />
+                          <div className="h-[1px] w-[1px] bg-white rounded-full absolute top-1.5 left-3.5 blur-[0.4px]" />
+                          <div className="h-[1px] w-[1px] bg-white rounded-full absolute top-4 left-1 blur-[0.5px]" />
+                        </div>
+                        <LiquidMetal
+                          style={{ height: 32, width: 32, filter: "blur(6px)", position: "absolute" }}
+                          colorBack="hsl(0, 0%, 0%, 0)"
+                          colorTint="hsl(220, 100%, 45%)"
+                          repetition={4}
+                          softness={0.5}
+                          shiftRed={0.05}
+                          shiftBlue={0.6}
+                          distortion={0.1}
+                          contour={1}
+                          shape="circle"
+                          offsetX={0}
+                          offsetY={0}
+                          scale={0.58}
+                          rotation={50}
+                          speed={5}
+                        />
+                        <LiquidMetal
+                          style={{ height: 32, width: 32 }}
+                          colorBack="hsl(0, 0%, 0%, 0)"
+                          colorTint="hsl(220, 100%, 45%)"
+                          repetition={4}
+                          softness={0.5}
+                          shiftRed={0.05}
+                          shiftBlue={0.6}
+                          distortion={0.1}
+                          contour={1}
+                          shape="circle"
+                          offsetX={0}
+                          offsetY={0}
+                          scale={0.58}
+                          rotation={50}
+                          speed={5}
+                        />
+                      </div>
+                      <div className="bg-zinc-900/80 border border-blue-500/20 rounded-2xl rounded-tl-sm px-4 py-3 max-w-[80%]">
+                        <p className="text-white/90 text-sm">{message.content}</p>
+                      </div>
+                    </div>
+                  )}
+                  {message.role === "user" && (
+                    <div className="bg-blue-600/20 border border-blue-500/30 rounded-2xl rounded-tr-sm px-4 py-3 max-w-[80%]">
+                      <p className="text-white text-sm">{message.content}</p>
+                    </div>
+                  )}
+                </motion.div>
+              ))}
+              
+              {/* Typing indicator */}
+              {isTyping && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex justify-start"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="relative flex items-center justify-center w-8 h-8 flex-shrink-0">
+                      <div className="z-10 absolute bg-white/5 h-6 w-6 rounded-full backdrop-blur-[2px]">
+                        <div className="h-[1px] w-[1px] bg-white rounded-full absolute top-2 left-2 blur-[0.5px]" />
+                        <div className="h-[1px] w-[1px] bg-white rounded-full absolute top-1.5 left-3.5 blur-[0.4px]" />
+                        <div className="h-[1px] w-[1px] bg-white rounded-full absolute top-4 left-1 blur-[0.5px]" />
+                      </div>
+                      <LiquidMetal
+                        style={{ height: 32, width: 32, filter: "blur(6px)", position: "absolute" }}
+                        colorBack="hsl(0, 0%, 0%, 0)"
+                        colorTint="hsl(220, 100%, 45%)"
+                        repetition={4}
+                        softness={0.5}
+                        shiftRed={0.05}
+                        shiftBlue={0.6}
+                        distortion={0.1}
+                        contour={1}
+                        shape="circle"
+                        offsetX={0}
+                        offsetY={0}
+                        scale={0.58}
+                        rotation={50}
+                        speed={5}
+                      />
+                      <LiquidMetal
+                        style={{ height: 32, width: 32 }}
+                        colorBack="hsl(0, 0%, 0%, 0)"
+                        colorTint="hsl(220, 100%, 45%)"
+                        repetition={4}
+                        softness={0.5}
+                        shiftRed={0.05}
+                        shiftBlue={0.6}
+                        distortion={0.1}
+                        contour={1}
+                        shape="circle"
+                        offsetX={0}
+                        offsetY={0}
+                        scale={0.58}
+                        rotation={50}
+                        speed={5}
+                      />
+                    </div>
+                    <div className="bg-zinc-900/80 border border-blue-500/20 rounded-2xl rounded-tl-sm px-4 py-3">
+                      <div className="flex gap-1">
+                        <motion.div
+                          className="w-2 h-2 bg-blue-500/60 rounded-full"
+                          animate={{ opacity: [0.4, 1, 0.4] }}
+                          transition={{ duration: 1, repeat: Infinity, delay: 0 }}
+                        />
+                        <motion.div
+                          className="w-2 h-2 bg-blue-500/60 rounded-full"
+                          animate={{ opacity: [0.4, 1, 0.4] }}
+                          transition={{ duration: 1, repeat: Infinity, delay: 0.2 }}
+                        />
+                        <motion.div
+                          className="w-2 h-2 bg-blue-500/60 rounded-full"
+                          animate={{ opacity: [0.4, 1, 0.4] }}
+                          transition={{ duration: 1, repeat: Infinity, delay: 0.4 }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+              <div ref={messagesEndRef} />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-          {/* Greeting Text */}
-          <motion.p
-            className="text-white/40 text-sm font-light z-10"
-            animate={{
-              y: isFocused ? 50 : 0,
-              opacity: isFocused ? 0 : 100,
-              filter: isFocused ? "blur(4px)" : "blur(0px)",
-            }}
-            transition={{
-              duration: 0.5,
-              type: "spring",
-              stiffness: 200,
-              damping: 20,
-            }}
-          >
-            Hey there! I'm here to help with anything you need
-          </motion.p>
-        </div>
+        {/* Welcome state - only show when no messages */}
+        <AnimatePresence>
+          {!hasMessages && (
+            <motion.div
+              className="flex flex-row items-center mb-2"
+              initial={{ opacity: 1 }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              {/* Shader Circle */}
+              <motion.div
+                id="circle-ball"
+                className="relative flex items-center justify-center z-10"
+                animate={{
+                  y: isFocused ? 50 : 0,
+                  opacity: isFocused ? 0 : 100,
+                  filter: isFocused ? "blur(4px)" : "blur(0px)",
+                  rotation: isFocused ? 180 : 0,
+                }}
+                transition={{
+                  duration: 0.5,
+                  type: "spring",
+                  stiffness: 200,
+                  damping: 20,
+                }}
+              >
+                <div className="z-10 absolute bg-white/5 h-11 w-11 rounded-full backdrop-blur-[3px]">
+                  <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-4 left-4  blur-[1px]" />
+                  <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-3 left-7  blur-[0.8px]" />
+                  <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-8 left-2  blur-[1px]" />
+                  <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-5 left-9 blur-[0.8px]" />
+                  <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-7 left-7  blur-[1px]" />
+                </div>
+                <LiquidMetal
+                  style={{ height: 80, width: 80, filter: "blur(14px)", position: "absolute" }}
+                  colorBack="hsl(0, 0%, 0%, 0)"
+                  colorTint="hsl(220, 100%, 45%)"
+                  repetition={4}
+                  softness={0.5}
+                  shiftRed={0.05}
+                  shiftBlue={0.6}
+                  distortion={0.1}
+                  contour={1}
+                  shape="circle"
+                  offsetX={0}
+                  offsetY={0}
+                  scale={0.58}
+                  rotation={50}
+                  speed={5}
+                />
+                <LiquidMetal
+                  style={{ height: 80, width: 80 }}
+                  colorBack="hsl(0, 0%, 0%, 0)"
+                  colorTint="hsl(220, 100%, 45%)"
+                  repetition={4}
+                  softness={0.5}
+                  shiftRed={0.05}
+                  shiftBlue={0.6}
+                  distortion={0.1}
+                  contour={1}
+                  shape="circle"
+                  offsetX={0}
+                  offsetY={0}
+                  scale={0.58}
+                  rotation={50}
+                  speed={5}
+                />
+              </motion.div>
+
+              {/* Greeting Text */}
+              <motion.p
+                className="text-white/40 text-sm font-light z-10"
+                animate={{
+                  y: isFocused ? 50 : 0,
+                  opacity: isFocused ? 0 : 100,
+                  filter: isFocused ? "blur(4px)" : "blur(0px)",
+                }}
+                transition={{
+                  duration: 0.5,
+                  type: "spring",
+                  stiffness: 200,
+                  damping: 20,
+                }}
+              >
+                Hey there! I'm here to help with anything you need
+              </motion.p>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className="relative">
           <motion.div
@@ -154,7 +369,10 @@ export function ChatInterface() {
             {/* Message Input */}
             <div className="relative mb-6">
               <Textarea
-                placeholder=""
+                placeholder="Ask me anything..."
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
                 className="min-h-[80px] resize-none bg-transparent border-none text-white text-base placeholder:text-zinc-500 focus:ring-0 focus:outline-none focus-visible:ring-0 focus-visible:outline-none [&:focus]:ring-0 [&:focus]:outline-none [&:focus-visible]:ring-0 [&:focus-visible]:outline-none"
                 onFocus={() => setIsFocused(true)}
                 onBlur={() => setIsFocused(false)}
@@ -214,9 +432,18 @@ export function ChatInterface() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-10 w-10 rounded-full bg-blue-600/25 hover:bg-blue-600/35 text-blue-500 p-0"
+                  className="h-10 w-10 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white p-0"
                 >
                   <Mic className="h-5 w-5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleSend}
+                  disabled={!inputValue.trim() || isTyping}
+                  className="h-10 w-10 rounded-full bg-blue-600/25 hover:bg-blue-600/35 text-blue-500 p-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Send className="h-5 w-5" />
                 </Button>
               </div>
             </div>
