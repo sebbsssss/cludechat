@@ -48,11 +48,11 @@ export function ChatInterface() {
             <LiquidMetal
               style={{ height: 80, width: 80, filter: "blur(14px)", position: "absolute" }}
               colorBack="hsl(0, 0%, 0%, 0)"
-              colorTint="hsl(29, 77%, 49%)"
+              colorTint="hsl(210, 80%, 55%)"
               repetition={4}
               softness={0.5}
-              shiftRed={0.3}
-              shiftBlue={0.3}
+              shiftRed={0.1}
+              shiftBlue={0.5}
               distortion={0.1}
               contour={1}
               shape="circle"
@@ -65,11 +65,11 @@ export function ChatInterface() {
             <LiquidMetal
               style={{ height: 80, width: 80 }}
               colorBack="hsl(0, 0%, 0%, 0)"
-              colorTint="hsl(29, 77%, 49%)"
+              colorTint="hsl(210, 80%, 55%)"
               repetition={4}
               softness={0.5}
-              shiftRed={0.3}
-              shiftBlue={0.3}
+              shiftRed={0.1}
+              shiftBlue={0.5}
               distortion={0.1}
               contour={1}
               shape="circle"
@@ -128,11 +128,11 @@ export function ChatInterface() {
               offsetY={0}
               speed={1}
               colors={[
-                "hsl(29, 70%, 37%)",
-                "hsl(32, 100%, 83%)",
-                "hsl(4, 32%, 30%)",
-                "hsl(25, 60%, 50%)",
-                "hsl(0, 100%, 10%)",
+                "hsl(210, 70%, 35%)",
+                "hsl(200, 90%, 70%)",
+                "hsl(220, 40%, 25%)",
+                "hsl(205, 60%, 50%)",
+                "hsl(220, 50%, 10%)",
               ]}
             />
           </motion.div>
@@ -140,7 +140,7 @@ export function ChatInterface() {
           <motion.div
             className="relative bg-[#040404] rounded-2xl p-4 z-10"
             animate={{
-              borderColor: isFocused ? "#BA9465" : "#3D3D3D",
+              borderColor: isFocused ? "#4A90D9" : "#3D3D3D",
             }}
             transition={{
               duration: 0.6,
@@ -214,7 +214,7 @@ export function ChatInterface() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-10 w-10 rounded-full bg-orange-200 hover:bg-orange-300 text-orange-800 p-0"
+                  className="h-10 w-10 rounded-full bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 p-0"
                 >
                   <Mic className="h-5 w-5" />
                 </Button>
