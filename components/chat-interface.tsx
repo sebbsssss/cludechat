@@ -2,32 +2,122 @@
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Brain, Link, Folder, Mic, Send } from "lucide-react"
+import { Brain, Link, Folder, Mic, Send, Plus, Trash2, Shield, ShieldAlert } from "lucide-react"
 import { LiquidMetal, PulsingBorder } from "@paper-design/shaders-react"
 import { motion, AnimatePresence } from "framer-motion"
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "https://clude.io"
+
+// ---- Types ---- //
 
 interface Message {
   id: string
   content: string
   role: "user" | "assistant"
   timestamp: Date
+  model?: string
+  memories_used?: number
 }
 
-const mockResponses = [
-  "I'd be happy to help you with that! Based on what you've shared, here's what I think would work best...",
-  "That's an interesting question. Let me break this down for you step by step.",
-  "Great thinking! Here's my perspective on this topic...",
-  "I understand what you're looking for. Here's a detailed explanation...",
-  "Thanks for asking! This is actually a fascinating topic. Let me explain...",
-]
+interface Conversation {
+  id: string
+  title: string | null
+  model: string
+  message_count: number
+  created_at: string
+  updated_at: string
+}
+
+interface ChatModel {
+  id: string
+  name: string
+  veniceId: string
+  privacy: "private" | "anonymized"
+  context: number
+  default?: boolean
+}
+
+// ---- Shader Avatar Component ---- //
+
+function CludeAvatar({ size = 32 }: { size?: number }) {
+  const glowSize = size * 1.2
+  const innerSize = size * 0.75
+  const dotSize = Math.max(1, size / 16)
+
+  return (
+    <div className="relative flex items-center justify-center flex-shrink-0" style={{ width: size, height: size }}>
+      <div
+        className="z-10 absolute rounded-full backdrop-blur-[2px]"
+        style={{
+          width: innerSize,
+          height: innerSize,
+          background: "rgba(255,255,255,0.05)",
+        }}
+      >
+        <div className="bg-white rounded-full absolute blur-[0.5px]" style={{ width: dotSize, height: dotSize, top: "30%", left: "30%" }} />
+        <div className="bg-white rounded-full absolute blur-[0.4px]" style={{ width: dotSize, height: dotSize, top: "22%", left: "55%" }} />
+        <div className="bg-white rounded-full absolute blur-[0.5px]" style={{ width: dotSize, height: dotSize, top: "60%", left: "15%" }} />
+        {size > 40 && (
+          <>
+            <div className="bg-white rounded-full absolute blur-[0.8px]" style={{ width: dotSize, height: dotSize, top: "38%", left: "72%" }} />
+            <div className="bg-white rounded-full absolute blur-[1px]" style={{ width: dotSize, height: dotSize, top: "58%", left: "58%" }} />
+          </>
+        )}
+      </div>
+      <LiquidMetal
+        style={{ height: glowSize, width: glowSize, filter: `blur(${Math.max(4, size / 5)}px)`, position: "absolute" }}
+        colorBack="hsl(0, 0%, 0%, 0)"
+        colorTint="hsl(220, 100%, 45%)"
+        repetition={4}
+        softness={0.5}
+        shiftRed={0.05}
+        shiftBlue={0.6}
+        distortion={0.1}
+        contour={1}
+        shape="circle"
+        offsetX={0}
+        offsetY={0}
+        scale={0.58}
+        rotation={50}
+        speed={5}
+      />
+      <LiquidMetal
+        style={{ height: glowSize, width: glowSize }}
+        colorBack="hsl(0, 0%, 0%, 0)"
+        colorTint="hsl(220, 100%, 45%)"
+        repetition={4}
+        softness={0.5}
+        shiftRed={0.05}
+        shiftBlue={0.6}
+        distortion={0.1}
+        contour={1}
+        shape="circle"
+        offsetX={0}
+        offsetY={0}
+        scale={0.58}
+        rotation={50}
+        speed={5}
+      />
+    </div>
+  )
+}
+
+// ---- Main Component ---- //
 
 export function ChatInterface() {
   const [isFocused, setIsFocused] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isTyping, setIsTyping] = useState(false)
+  const [apiKey, setApiKey] = useState("")
+  const [models, setModels] = useState<ChatModel[]>([])
+  const [selectedModel, setSelectedModel] = useState("qwen3-5-9b")
+  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [showSidebar, setShowSidebar] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -37,31 +127,242 @@ export function ChatInterface() {
     scrollToBottom()
   }, [messages])
 
-  const handleSend = async () => {
-    if (!inputValue.trim()) return
+  // Load API key from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("clude_chat_api_key")
+    if (saved) setApiKey(saved)
+  }, [])
 
+  // Fetch models
+  useEffect(() => {
+    fetch(`${API_BASE}/api/chat/models`)
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) setModels(data)
+      })
+      .catch(() => {})
+  }, [])
+
+  // Fetch conversations when API key is set
+  useEffect(() => {
+    if (!apiKey) return
+    fetch(`${API_BASE}/api/chat/conversations?limit=20`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) setConversations(data)
+      })
+      .catch(() => {})
+  }, [apiKey])
+
+  const createConversation = useCallback(async (): Promise<string | null> => {
+    if (!apiKey) return null
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/conversations`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ model: selectedModel }),
+      })
+      const data = await res.json()
+      if (data.id) {
+        setConversationId(data.id)
+        return data.id
+      }
+    } catch {}
+    return null
+  }, [apiKey, selectedModel])
+
+  const loadConversation = useCallback(async (id: string) => {
+    if (!apiKey) return
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/conversations/${id}`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      })
+      const data = await res.json()
+      if (data.messages) {
+        setConversationId(id)
+        setMessages(
+          data.messages
+            .filter((m: any) => m.role !== "system")
+            .map((m: any) => ({
+              id: m.id,
+              content: m.content,
+              role: m.role,
+              timestamp: new Date(m.created_at),
+              model: m.model,
+            }))
+        )
+        if (data.model) setSelectedModel(data.model)
+      }
+    } catch {}
+  }, [apiKey])
+
+  const deleteConversation = useCallback(async (id: string) => {
+    if (!apiKey) return
+    try {
+      await fetch(`${API_BASE}/api/chat/conversations/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${apiKey}` },
+      })
+      setConversations(prev => prev.filter(c => c.id !== id))
+      if (conversationId === id) {
+        setConversationId(null)
+        setMessages([])
+      }
+    } catch {}
+  }, [apiKey, conversationId])
+
+  const handleSend = async () => {
+    if (!inputValue.trim() || isTyping) return
+
+    // Require API key
+    if (!apiKey) {
+      const key = prompt("Enter your Clude API key (clk_...):")
+      if (!key) return
+      setApiKey(key)
+      localStorage.setItem("clude_chat_api_key", key)
+      return
+    }
+
+    const userContent = inputValue.trim()
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: inputValue.trim(),
+      content: userContent,
       role: "user",
       timestamp: new Date(),
     }
 
-    setMessages((prev) => [...prev, userMessage])
+    setMessages(prev => [...prev, userMessage])
     setInputValue("")
     setIsTyping(true)
 
-    // Simulate AI response delay
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: mockResponses[Math.floor(Math.random() * mockResponses.length)],
-        role: "assistant",
-        timestamp: new Date(),
+    // Auto-resize textarea back
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "80px"
+    }
+
+    try {
+      // Create conversation if needed
+      let convId = conversationId
+      if (!convId) {
+        convId = await createConversation()
+        if (!convId) {
+          setIsTyping(false)
+          return
+        }
       }
-      setMessages((prev) => [...prev, assistantMessage])
+
+      // Send message via SSE
+      const res = await fetch(`${API_BASE}/api/chat/conversations/${convId}/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ content: userContent, model: selectedModel }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" }))
+        setMessages(prev => [
+          ...prev,
+          {
+            id: (Date.now() + 1).toString(),
+            content: `Error: ${err.error || res.statusText}`,
+            role: "assistant",
+            timestamp: new Date(),
+          },
+        ])
+        setIsTyping(false)
+        return
+      }
+
+      // Stream SSE response
+      const reader = res.body?.getReader()
+      if (!reader) {
+        setIsTyping(false)
+        return
+      }
+
+      const assistantId = (Date.now() + 1).toString()
+      let fullContent = ""
+
+      // Add empty assistant message
+      setMessages(prev => [
+        ...prev,
+        { id: assistantId, content: "", role: "assistant", timestamp: new Date(), model: selectedModel },
+      ])
       setIsTyping(false)
-    }, 1500)
+
+      const decoder = new TextDecoder()
+      let buffer = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || ""
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed || !trimmed.startsWith("data: ")) continue
+
+          const data = trimmed.slice(6)
+          if (data === "[DONE]") continue
+
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.content) {
+              fullContent += parsed.content
+              setMessages(prev =>
+                prev.map(m => (m.id === assistantId ? { ...m, content: fullContent } : m))
+              )
+            }
+            if (parsed.done) {
+              setMessages(prev =>
+                prev.map(m =>
+                  m.id === assistantId
+                    ? { ...m, id: parsed.message_id || m.id, memories_used: parsed.memories_used }
+                    : m
+                )
+              )
+            }
+            if (parsed.error) {
+              setMessages(prev =>
+                prev.map(m => (m.id === assistantId ? { ...m, content: `Error: ${parsed.error}` } : m))
+              )
+            }
+          } catch {}
+        }
+      }
+
+      // Refresh conversation list
+      fetch(`${API_BASE}/api/chat/conversations?limit=20`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (Array.isArray(data)) setConversations(data)
+        })
+        .catch(() => {})
+    } catch (err) {
+      setMessages(prev => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          content: "Error: Failed to connect to Clude. Please try again.",
+          role: "assistant",
+          timestamp: new Date(),
+        },
+      ])
+      setIsTyping(false)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -71,133 +372,148 @@ export function ChatInterface() {
     }
   }
 
+  const handleNewChat = () => {
+    setConversationId(null)
+    setMessages([])
+  }
+
   const hasMessages = messages.length > 0
+  const currentModel = models.find(m => m.id === selectedModel)
 
   return (
     <div className="flex flex-col min-h-screen p-4">
       <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col">
-        {/* Messages Area */}
+
+        {/* Top bar */}
+        <div className="flex items-center justify-between mb-4">
+          <button
+            onClick={() => setShowSidebar(!showSidebar)}
+            className="text-zinc-500 hover:text-white text-xs uppercase tracking-widest transition-colors"
+          >
+            {showSidebar ? "Close" : "History"}
+          </button>
+          <div className="flex items-center gap-2">
+            {currentModel && (
+              <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+                currentModel.privacy === "private"
+                  ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                  : "text-amber-400 border-amber-500/30 bg-amber-500/10"
+              }`}>
+                {currentModel.privacy === "private" ? "Full Private" : "Anonymized"}
+              </span>
+            )}
+            <button
+              onClick={handleNewChat}
+              className="text-zinc-500 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-zinc-800"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Conversation sidebar */}
         <AnimatePresence>
-          {hasMessages && (
+          {showSidebar && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
-              className="flex-1 overflow-y-auto mb-4 space-y-4 max-h-[60vh]"
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-4 overflow-hidden"
             >
-              {messages.map((message) => (
+              <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-3 max-h-[200px] overflow-y-auto space-y-1">
+                {conversations.length === 0 && (
+                  <p className="text-zinc-600 text-xs text-center py-4">No conversations yet</p>
+                )}
+                {conversations.map(conv => (
+                  <div
+                    key={conv.id}
+                    className={`flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors text-sm ${
+                      conv.id === conversationId
+                        ? "bg-blue-600/15 text-white"
+                        : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                    }`}
+                    onClick={() => loadConversation(conv.id)}
+                  >
+                    <span className="truncate flex-1 mr-2">
+                      {conv.title || "Untitled"}
+                    </span>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation()
+                        deleteConversation(conv.id)
+                      }}
+                      className="text-zinc-600 hover:text-red-400 transition-colors flex-shrink-0"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Messages Area */}
+        <AnimatePresence mode="wait">
+          {hasMessages && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.5, ease: "easeOut" }}
+              className="flex-1 overflow-y-auto mb-4 space-y-5 max-h-[60vh] pr-2"
+            >
+              {messages.map((message, index) => (
                 <motion.div
                   key={message.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
+                  initial={{ opacity: 0, y: 16, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{
+                    duration: 0.4,
+                    ease: [0.25, 0.46, 0.45, 0.94],
+                    delay: index === messages.length - 1 ? 0.05 : 0,
+                  }}
                   className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
                 >
                   {message.role === "assistant" && (
                     <div className="flex items-start gap-3">
-                      {/* Mini shader avatar for assistant */}
-                      <div className="relative flex items-center justify-center w-8 h-8 flex-shrink-0">
-                        <div className="z-10 absolute bg-white/5 h-6 w-6 rounded-full backdrop-blur-[2px]">
-                          <div className="h-[1px] w-[1px] bg-white rounded-full absolute top-2 left-2 blur-[0.5px]" />
-                          <div className="h-[1px] w-[1px] bg-white rounded-full absolute top-1.5 left-3.5 blur-[0.4px]" />
-                          <div className="h-[1px] w-[1px] bg-white rounded-full absolute top-4 left-1 blur-[0.5px]" />
-                        </div>
-                        <LiquidMetal
-                          style={{ height: 32, width: 32, filter: "blur(6px)", position: "absolute" }}
-                          colorBack="hsl(0, 0%, 0%, 0)"
-                          colorTint="hsl(220, 100%, 45%)"
-                          repetition={4}
-                          softness={0.5}
-                          shiftRed={0.05}
-                          shiftBlue={0.6}
-                          distortion={0.1}
-                          contour={1}
-                          shape="circle"
-                          offsetX={0}
-                          offsetY={0}
-                          scale={0.58}
-                          rotation={50}
-                          speed={5}
-                        />
-                        <LiquidMetal
-                          style={{ height: 32, width: 32 }}
-                          colorBack="hsl(0, 0%, 0%, 0)"
-                          colorTint="hsl(220, 100%, 45%)"
-                          repetition={4}
-                          softness={0.5}
-                          shiftRed={0.05}
-                          shiftBlue={0.6}
-                          distortion={0.1}
-                          contour={1}
-                          shape="circle"
-                          offsetX={0}
-                          offsetY={0}
-                          scale={0.58}
-                          rotation={50}
-                          speed={5}
-                        />
-                      </div>
+                      <motion.div
+                        initial={{ scale: 0, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ duration: 0.3, delay: 0.1, type: "spring", stiffness: 300, damping: 20 }}
+                      >
+                        <CludeAvatar size={32} />
+                      </motion.div>
                       <div className="bg-zinc-900/80 border border-blue-500/20 rounded-2xl rounded-tl-sm px-4 py-3 max-w-[80%]">
-                        <p className="text-white/90 text-sm">{message.content}</p>
+                        <p className="text-white/90 text-sm whitespace-pre-wrap">{message.content || "..."}</p>
+                        {message.memories_used && message.memories_used > 0 && (
+                          <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-white/5">
+                            <Brain className="h-3 w-3 text-blue-400/60" />
+                            <span className="text-[10px] text-blue-400/60">{message.memories_used} memories recalled</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
                   {message.role === "user" && (
-                    <div className="bg-blue-600/20 border border-blue-500/30 rounded-2xl rounded-tr-sm px-4 py-3 max-w-[80%]">
-                      <p className="text-white text-sm">{message.content}</p>
-                    </div>
+                    <motion.div
+                      className="bg-blue-600/20 border border-blue-500/30 rounded-2xl rounded-tr-sm px-4 py-3 max-w-[80%]"
+                    >
+                      <p className="text-white text-sm whitespace-pre-wrap">{message.content}</p>
+                    </motion.div>
                   )}
                 </motion.div>
               ))}
-              
+
               {/* Typing indicator */}
               {isTyping && (
                 <motion.div
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
                   className="flex justify-start"
                 >
                   <div className="flex items-start gap-3">
-                    <div className="relative flex items-center justify-center w-8 h-8 flex-shrink-0">
-                      <div className="z-10 absolute bg-white/5 h-6 w-6 rounded-full backdrop-blur-[2px]">
-                        <div className="h-[1px] w-[1px] bg-white rounded-full absolute top-2 left-2 blur-[0.5px]" />
-                        <div className="h-[1px] w-[1px] bg-white rounded-full absolute top-1.5 left-3.5 blur-[0.4px]" />
-                        <div className="h-[1px] w-[1px] bg-white rounded-full absolute top-4 left-1 blur-[0.5px]" />
-                      </div>
-                      <LiquidMetal
-                        style={{ height: 32, width: 32, filter: "blur(6px)", position: "absolute" }}
-                        colorBack="hsl(0, 0%, 0%, 0)"
-                        colorTint="hsl(220, 100%, 45%)"
-                        repetition={4}
-                        softness={0.5}
-                        shiftRed={0.05}
-                        shiftBlue={0.6}
-                        distortion={0.1}
-                        contour={1}
-                        shape="circle"
-                        offsetX={0}
-                        offsetY={0}
-                        scale={0.58}
-                        rotation={50}
-                        speed={5}
-                      />
-                      <LiquidMetal
-                        style={{ height: 32, width: 32 }}
-                        colorBack="hsl(0, 0%, 0%, 0)"
-                        colorTint="hsl(220, 100%, 45%)"
-                        repetition={4}
-                        softness={0.5}
-                        shiftRed={0.05}
-                        shiftBlue={0.6}
-                        distortion={0.1}
-                        contour={1}
-                        shape="circle"
-                        offsetX={0}
-                        offsetY={0}
-                        scale={0.58}
-                        rotation={50}
-                        speed={5}
-                      />
-                    </div>
+                    <CludeAvatar size={32} />
                     <div className="bg-zinc-900/80 border border-blue-500/20 rounded-2xl rounded-tl-sm px-4 py-3">
                       <div className="flex gap-1">
                         <motion.div
@@ -225,16 +541,15 @@ export function ChatInterface() {
           )}
         </AnimatePresence>
 
-        {/* Welcome state - only show when no messages */}
+        {/* Welcome state */}
         <AnimatePresence>
           {!hasMessages && (
             <motion.div
               className="flex flex-row items-center mb-2"
               initial={{ opacity: 1 }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.3 }}
+              exit={{ opacity: 0, y: -30, scale: 0.95, filter: "blur(8px)" }}
+              transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
             >
-              {/* Shader Circle */}
               <motion.div
                 id="circle-ball"
                 className="relative flex items-center justify-center z-10"
@@ -251,50 +566,9 @@ export function ChatInterface() {
                   damping: 20,
                 }}
               >
-                <div className="z-10 absolute bg-white/5 h-11 w-11 rounded-full backdrop-blur-[3px]">
-                  <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-4 left-4  blur-[1px]" />
-                  <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-3 left-7  blur-[0.8px]" />
-                  <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-8 left-2  blur-[1px]" />
-                  <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-5 left-9 blur-[0.8px]" />
-                  <div className="h-[2px] w-[2px] bg-white rounded-full absolute top-7 left-7  blur-[1px]" />
-                </div>
-                <LiquidMetal
-                  style={{ height: 80, width: 80, filter: "blur(14px)", position: "absolute" }}
-                  colorBack="hsl(0, 0%, 0%, 0)"
-                  colorTint="hsl(220, 100%, 45%)"
-                  repetition={4}
-                  softness={0.5}
-                  shiftRed={0.05}
-                  shiftBlue={0.6}
-                  distortion={0.1}
-                  contour={1}
-                  shape="circle"
-                  offsetX={0}
-                  offsetY={0}
-                  scale={0.58}
-                  rotation={50}
-                  speed={5}
-                />
-                <LiquidMetal
-                  style={{ height: 80, width: 80 }}
-                  colorBack="hsl(0, 0%, 0%, 0)"
-                  colorTint="hsl(220, 100%, 45%)"
-                  repetition={4}
-                  softness={0.5}
-                  shiftRed={0.05}
-                  shiftBlue={0.6}
-                  distortion={0.1}
-                  contour={1}
-                  shape="circle"
-                  offsetX={0}
-                  offsetY={0}
-                  scale={0.58}
-                  rotation={50}
-                  speed={5}
-                />
+                <CludeAvatar size={80} />
               </motion.div>
 
-              {/* Greeting Text */}
               <motion.p
                 className="text-white/40 text-sm font-light z-10"
                 animate={{
@@ -309,20 +583,19 @@ export function ChatInterface() {
                   damping: 20,
                 }}
               >
-                Hey there! I'm here to help with anything you need
+                I'm Clude — your personal AI assistant with persistent memory
               </motion.p>
             </motion.div>
           )}
         </AnimatePresence>
 
+        {/* Input area */}
         <div className="relative">
           <motion.div
             className="absolute w-full h-full z-0 flex items-center justify-center"
             initial={{ opacity: 0 }}
             animate={{ opacity: isFocused ? 1 : 0 }}
-            transition={{
-              duration: 0.8, 
-            }}
+            transition={{ duration: 0.8 }}
           >
             <PulsingBorder
               style={{ height: "146.5%", minWidth: "143%" }}
@@ -357,21 +630,15 @@ export function ChatInterface() {
             animate={{
               borderColor: isFocused ? "#1E50E6" : "#3D3D3D",
             }}
-            transition={{
-              duration: 0.6,
-              delay: 0.1,
-            }}
-            style={{
-              borderWidth: "1px",
-              borderStyle: "solid",
-            }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+            style={{ borderWidth: "1px", borderStyle: "solid" }}
           >
-            {/* Message Input */}
             <div className="relative mb-6">
               <Textarea
+                ref={textareaRef}
                 placeholder="Ask me anything..."
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                onChange={e => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
                 className="min-h-[80px] resize-none bg-transparent border-none text-white text-base placeholder:text-zinc-500 focus:ring-0 focus:outline-none focus-visible:ring-0 focus-visible:outline-none [&:focus]:ring-0 [&:focus]:outline-none [&:focus-visible]:ring-0 [&:focus-visible]:outline-none"
                 onFocus={() => setIsFocused(true)}
@@ -380,12 +647,12 @@ export function ChatInterface() {
             </div>
 
             <div className="flex items-center justify-between">
-              {/* Left side icons */}
               <div className="flex items-center gap-3">
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-9 w-9 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-100 hover:text-white p-0"
+                  title="Memory recall active"
                 >
                   <Brain className="h-4 w-4" />
                 </Button>
@@ -396,31 +663,50 @@ export function ChatInterface() {
                 >
                   <Link className="h-4 w-4" />
                 </Button>
-                {/* Center model selector */}
+
+                {/* Model selector with privacy labels */}
                 <div className="flex items-center">
-                  <Select defaultValue="gpt-4">
-                    <SelectTrigger className="bg-zinc-900 border-[#3D3D3D] text-white hover:bg-zinc-700 text-xs rounded-full px-2 h-8 min-w-[150px]">
+                  <Select value={selectedModel} onValueChange={setSelectedModel}>
+                    <SelectTrigger className="bg-zinc-900 border-[#3D3D3D] text-white hover:bg-zinc-700 text-xs rounded-full px-2 h-8 min-w-[180px]">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs">⚡</span>
+                        {currentModel?.privacy === "private" ? (
+                          <Shield className="h-3 w-3 text-emerald-400" />
+                        ) : (
+                          <ShieldAlert className="h-3 w-3 text-amber-400" />
+                        )}
                         <SelectValue />
                       </div>
                     </SelectTrigger>
-                    <SelectContent className="bg-zinc-900 z-30 border-[#3D3D3D] rounded-xl z-30">
-                      <SelectItem value="gemini-2.5-pro" className="text-white hover:bg-zinc-700 rounded-lg">
-                        Gemini 2.5 Pro
-                      </SelectItem>
-                      <SelectItem value="gpt-4" className="text-white hover:bg-zinc-700 rounded-lg">
-                        GPT-4
-                      </SelectItem>
-                      <SelectItem value="claude-3" className="text-white hover:bg-zinc-700 rounded-lg">
-                        Claude 3
-                      </SelectItem>
+                    <SelectContent className="bg-zinc-900 z-30 border-[#3D3D3D] rounded-xl max-h-[300px]">
+                      {/* Private models */}
+                      <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-emerald-400/70 font-semibold">
+                        Private — Zero Data Retention
+                      </div>
+                      {models.filter(m => m.privacy === "private").map(m => (
+                        <SelectItem key={m.id} value={m.id} className="text-white hover:bg-zinc-700 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <Shield className="h-3 w-3 text-emerald-400/70" />
+                            <span>{m.name}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                      {/* Anonymized models */}
+                      <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-amber-400/70 font-semibold mt-1">
+                        Anonymized — Via Third-Party
+                      </div>
+                      {models.filter(m => m.privacy === "anonymized").map(m => (
+                        <SelectItem key={m.id} value={m.id} className="text-white hover:bg-zinc-700 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <ShieldAlert className="h-3 w-3 text-amber-400/70" />
+                            <span>{m.name}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
 
-              {/* Right side icons */}
               <div className="flex items-center gap-3">
                 <Button
                   variant="ghost"
