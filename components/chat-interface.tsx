@@ -405,7 +405,7 @@ export function ChatInterface() {
                         <SelectValue />
                       </div>
                     </SelectTrigger>
-                    <SelectContent className="bg-zinc-900 z-30 border-[#3D3D3D] rounded-xl z-30">
+                    <SelectContent className="bg-zinc-900 z-30 border-[#3D3D3D] rounded-xl">
                       <SelectItem value="gemini-2.5-pro" className="text-white hover:bg-zinc-700 rounded-lg">
                         Gemini 2.5 Pro
                       </SelectItem>
