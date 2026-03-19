@@ -2,12 +2,15 @@
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Brain, Link, Folder, Mic, Send, Plus, Trash2, Shield, ShieldAlert } from "lucide-react"
+import { Brain, Link, Folder, Mic, Send, Plus, Trash2, Shield, ShieldAlert, Wallet, LogOut } from "lucide-react"
 import { LiquidMetal, PulsingBorder } from "@paper-design/shaders-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useState, useRef, useEffect, useCallback } from "react"
+import { usePrivy } from "@privy-io/react-auth"
+import { useSolanaWallets } from "@privy-io/react-auth/solana"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "https://clude.io"
+const FREE_MESSAGE_LIMIT = 10
 
 // ---- Types ---- //
 
@@ -106,6 +109,10 @@ function CludeAvatar({ size = 32 }: { size?: number }) {
 // ---- Main Component ---- //
 
 export function ChatInterface() {
+  const { authenticated, login, logout: privyLogout, ready } = usePrivy()
+  const { wallets: solanaWallets } = useSolanaWallets()
+  const walletAddress = solanaWallets?.[0]?.address || null
+
   const [isFocused, setIsFocused] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
@@ -116,8 +123,13 @@ export function ChatInterface() {
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [showSidebar, setShowSidebar] = useState(false)
+  const [guestCount, setGuestCount] = useState(0)
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const isGuest = !apiKey && !authenticated
+  const remainingFree = Math.max(0, FREE_MESSAGE_LIMIT - guestCount)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -127,11 +139,46 @@ export function ChatInterface() {
     scrollToBottom()
   }, [messages])
 
-  // Load API key from localStorage
+  // Load API key and guest count from localStorage
   useEffect(() => {
     const saved = localStorage.getItem("clude_chat_api_key")
     if (saved) setApiKey(saved)
+    const count = parseInt(localStorage.getItem("clude_guest_count") || "0")
+    setGuestCount(count)
   }, [])
+
+  // When wallet connects via Privy, auto-register a cortex API key
+  useEffect(() => {
+    if (authenticated && walletAddress && !apiKey) {
+      // Try to register or use existing key
+      const savedKey = localStorage.getItem("clude_chat_api_key")
+      if (savedKey) {
+        setApiKey(savedKey)
+        return
+      }
+      // Auto-register
+      fetch(`${API_BASE}/api/cortex/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `chat-${walletAddress.slice(0, 8)}`, wallet: walletAddress }),
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data.apiKey) {
+            setApiKey(data.apiKey)
+            localStorage.setItem("clude_chat_api_key", data.apiKey)
+          } else if (data.error?.includes("already registered")) {
+            // Wallet already registered — prompt for key
+            const key = prompt("Your wallet is already registered. Enter your API key (clk_...):")
+            if (key) {
+              setApiKey(key)
+              localStorage.setItem("clude_chat_api_key", key)
+            }
+          }
+        })
+        .catch(() => {})
+    }
+  }, [authenticated, walletAddress, apiKey])
 
   // Fetch models
   useEffect(() => {
@@ -219,12 +266,9 @@ export function ChatInterface() {
   const handleSend = async () => {
     if (!inputValue.trim() || isTyping) return
 
-    // Require API key
-    if (!apiKey) {
-      const key = prompt("Enter your Clude API key (clk_...):")
-      if (!key) return
-      setApiKey(key)
-      localStorage.setItem("clude_chat_api_key", key)
+    // Check if guest limit reached
+    if (isGuest && guestCount >= FREE_MESSAGE_LIMIT) {
+      setShowAuthPrompt(true)
       return
     }
 
@@ -246,25 +290,57 @@ export function ChatInterface() {
     }
 
     try {
-      // Create conversation if needed
-      let convId = conversationId
-      if (!convId) {
-        convId = await createConversation()
-        if (!convId) {
+      let res: Response
+
+      if (isGuest) {
+        // Guest mode — no auth, no memory, limited model
+        const history = messages.slice(-10).map(m => ({ role: m.role, content: m.content }))
+        res = await fetch(`${API_BASE}/api/chat/guest`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: userContent, history }),
+        })
+
+        // Track guest usage
+        const newCount = guestCount + 1
+        setGuestCount(newCount)
+        localStorage.setItem("clude_guest_count", String(newCount))
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: "Request failed" }))
+          if (err.requireAuth) {
+            setShowAuthPrompt(true)
+          }
+          setMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            content: err.error || "Request failed",
+            role: "assistant",
+            timestamp: new Date(),
+          }])
           setIsTyping(false)
           return
         }
-      }
+      } else {
+        // Authenticated mode — full features
+        // Create conversation if needed
+        let convId = conversationId
+        if (!convId) {
+          convId = await createConversation()
+          if (!convId) {
+            setIsTyping(false)
+            return
+          }
+        }
 
-      // Send message via SSE
-      const res = await fetch(`${API_BASE}/api/chat/conversations/${convId}/messages`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({ content: userContent, model: selectedModel }),
-      })
+        res = await fetch(`${API_BASE}/api/chat/conversations/${convId}/messages`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({ content: userContent, model: selectedModel }),
+        })
+      }
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Request failed" }))
@@ -384,14 +460,74 @@ export function ChatInterface() {
     <div className="flex flex-col h-screen p-4">
       <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col">
 
+        {/* Auth prompt overlay */}
+        <AnimatePresence>
+          {showAuthPrompt && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+              onClick={() => setShowAuthPrompt(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-zinc-900 border border-zinc-700 rounded-2xl p-8 max-w-md mx-4"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-center mb-4">
+                  <CludeAvatar size={48} />
+                </div>
+                <h2 className="text-white text-lg font-semibold text-center mb-2">
+                  Unlock Persistent Memory
+                </h2>
+                <p className="text-zinc-400 text-sm text-center mb-6 leading-relaxed">
+                  Sign in to get unlimited messages, memory across conversations, and access to all models.
+                </p>
+                <button
+                  onClick={() => { login(); setShowAuthPrompt(false); }}
+                  className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl py-3 px-4 font-medium transition-colors mb-3"
+                >
+                  <Wallet className="h-4 w-4" />
+                  Connect Wallet
+                </button>
+                <button
+                  onClick={() => {
+                    const key = prompt("Enter your Clude API key (clk_...):")
+                    if (key) {
+                      setApiKey(key)
+                      localStorage.setItem("clude_chat_api_key", key)
+                      setShowAuthPrompt(false)
+                    }
+                  }}
+                  className="w-full text-zinc-500 hover:text-zinc-300 text-sm py-2 transition-colors"
+                >
+                  Or enter API key
+                </button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Top bar */}
         <div className="flex items-center justify-between mb-4">
-          <button
-            onClick={() => setShowSidebar(!showSidebar)}
-            className="text-zinc-500 hover:text-white text-xs uppercase tracking-widest transition-colors"
-          >
-            {showSidebar ? "Close" : "History"}
-          </button>
+          <div className="flex items-center gap-3">
+            {apiKey && (
+              <button
+                onClick={() => setShowSidebar(!showSidebar)}
+                className="text-zinc-500 hover:text-white text-xs uppercase tracking-widest transition-colors"
+              >
+                {showSidebar ? "Close" : "History"}
+              </button>
+            )}
+            {isGuest && (
+              <span className="text-[10px] text-zinc-500">
+                {remainingFree} free messages left
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             {currentModel && (
               <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border ${
@@ -402,12 +538,39 @@ export function ChatInterface() {
                 {currentModel.privacy === "private" ? "Private" : "Anonymized"}
               </span>
             )}
-            <button
-              onClick={handleNewChat}
-              className="text-zinc-500 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-zinc-800"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
+            {apiKey && (
+              <button
+                onClick={handleNewChat}
+                className="text-zinc-500 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-zinc-800"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            )}
+            {isGuest ? (
+              <button
+                onClick={() => setShowAuthPrompt(true)}
+                className="flex items-center gap-1.5 text-blue-400 hover:text-blue-300 text-xs transition-colors"
+              >
+                <Wallet className="h-3.5 w-3.5" />
+                Sign In
+              </button>
+            ) : walletAddress ? (
+              <button
+                onClick={() => { privyLogout(); setApiKey(""); localStorage.removeItem("clude_chat_api_key"); }}
+                className="flex items-center gap-1.5 text-zinc-500 hover:text-white text-xs transition-colors"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                {walletAddress.slice(0, 4)}...{walletAddress.slice(-4)}
+              </button>
+            ) : apiKey ? (
+              <button
+                onClick={() => { setApiKey(""); localStorage.removeItem("clude_chat_api_key"); setMessages([]); setConversationId(null); }}
+                className="flex items-center gap-1.5 text-zinc-500 hover:text-white text-xs transition-colors"
+              >
+                <LogOut className="h-3 w-3" />
+                Sign Out
+              </button>
+            ) : null}
           </div>
         </div>
 
