@@ -381,7 +381,7 @@ export function ChatInterface() {
   const currentModel = models.find(m => m.id === selectedModel)
 
   return (
-    <div className="flex flex-col min-h-screen p-4">
+    <div className="flex flex-col h-screen p-4">
       <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col">
 
         {/* Top bar */}
@@ -545,7 +545,7 @@ export function ChatInterface() {
         <AnimatePresence>
           {!hasMessages && (
             <motion.div
-              className="flex flex-row items-center mb-2"
+              className="flex-1 flex flex-col items-center justify-center mb-2"
               initial={{ opacity: 1 }}
               exit={{ opacity: 0, y: -30, scale: 0.95, filter: "blur(8px)" }}
               transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
