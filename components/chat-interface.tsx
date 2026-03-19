@@ -399,7 +399,7 @@ export function ChatInterface() {
                   ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
                   : "text-amber-400 border-amber-500/30 bg-amber-500/10"
               }`}>
-                {currentModel.privacy === "private" ? "Full Private" : "Anonymized"}
+                {currentModel.privacy === "private" ? "Private" : "Anonymized"}
               </span>
             )}
             <button
@@ -690,6 +690,7 @@ export function ChatInterface() {
                           <div className="flex items-center gap-2">
                             <Shield className="h-3 w-3 text-emerald-400/70" />
                             <span>{m.name}</span>
+                            <span className="text-[9px] uppercase tracking-wider text-emerald-400/60 border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 rounded-full ml-auto">Private</span>
                           </div>
                         </SelectItem>
                       ))}
@@ -702,6 +703,7 @@ export function ChatInterface() {
                           <div className="flex items-center gap-2">
                             <ShieldAlert className="h-3 w-3 text-amber-400/70" />
                             <span>{m.name}</span>
+                            <span className="text-[9px] uppercase tracking-wider text-amber-400/60 border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 rounded-full ml-auto">Anonymized</span>
                           </div>
                         </SelectItem>
                       ))}

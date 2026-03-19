@@ -12,9 +12,9 @@ const doto = Doto({
 })
 
 export const metadata: Metadata = {
-  title: "v0 App",
-  description: "Created with v0",
-  generator: "v0.app",
+  title: "Clude Chat",
+  description: "AI chat with persistent memory. Private inference via Venice AI.",
+  icons: { icon: "/favicon.svg" },
 }
 
 export default function RootLayout({
