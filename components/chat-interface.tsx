@@ -541,11 +541,14 @@ export function ChatInterface() {
           )}
         </AnimatePresence>
 
+        {/* Spacer to push welcome + input to bottom */}
+        {!hasMessages && <div className="flex-1" />}
+
         {/* Welcome state */}
         <AnimatePresence>
           {!hasMessages && (
             <motion.div
-              className="flex-1 flex flex-col items-center justify-center mb-2"
+              className="flex flex-row items-center gap-3 mb-4"
               initial={{ opacity: 1 }}
               exit={{ opacity: 0, y: -30, scale: 0.95, filter: "blur(8px)" }}
               transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
@@ -566,7 +569,7 @@ export function ChatInterface() {
                   damping: 20,
                 }}
               >
-                <CludeAvatar size={80} />
+                <CludeAvatar size={40} />
               </motion.div>
 
               <motion.p
